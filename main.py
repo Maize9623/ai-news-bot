@@ -1,6 +1,7 @@
 import feedparser
 import requests
-from datetime import datetime
+import re
+from googletrans import Translator
 
 # ===== RSS 源 =====
 rss_list = [
@@ -42,16 +43,35 @@ FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bd733c08-ca3a-4bb
 ai_keywords = ["AI", "人工智能", "机器学习"]
 edu_keywords = ["AI教育", "AI教学", "教师", "学生"]
 
+# ===== 翻译工具 =====
+translator = Translator()
+
 # ===== 工具函数 =====
 def is_match(text, keywords):
     return any(k.lower() in text.lower() for k in keywords)
+
+def clean_text(text):
+    text = re.sub(r'<.*?>', '', text)  # 去掉 HTML 标签
+    return ' '.join(text.split())       # 去掉多余空格
+
+def translate_to_chinese(text):
+    try:
+        return translator.translate(text, dest='zh-cn').text
+    except:
+        return text
+
+def generate_summary(text, max_len=100):
+    text = clean_text(text)
+    if len(text) > max_len:
+        return text[:max_len] + "…"
+    return text
 
 def fetch_news():
     news = []
     for url in rss_list:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:10]:  # 每源前10条
+            for entry in feed.entries[:10]:
                 news.append({
                     "title": entry.title,
                     "link": entry.link,
@@ -60,46 +80,43 @@ def fetch_news():
                 })
         except Exception as e:
             print(f"Failed to fetch {url}: {e}")
-            continue
     return news
 
 def classify_news(news):
     zh_news, en_news, edu_news = [], [], []
     for n in news:
-        text = n["title"] + n["summary"]
+        text = n['title'] + n['summary']
         if is_match(text, ai_keywords):
             if is_match(text, edu_keywords):
                 edu_news.append(n)
-            elif any(char.isascii() for char in n["title"]):
+            elif any(c.isascii() for c in n['title']):
                 en_news.append(n)
             else:
                 zh_news.append(n)
     return zh_news, en_news, edu_news
 
-def generate_summary(text, max_len=100):
-    # 规则生成摘要：取前 max_len 字，去掉多余空格
-    clean_text = ' '.join(text.split())
-    if len(clean_text) > max_len:
-        return clean_text[:max_len] + "…"
-    return clean_text
+def format_news_item(news, media_type, translate=False):
+    title = clean_text(news['title'])
+    summary = clean_text(news['summary'])
+    if translate:
+        title = translate_to_chinese(title)
+        summary = translate_to_chinese(summary)
+    summary_text = generate_summary(summary, max_len=100)
+    published = news.get('published', '')
+    link = news.get('link', '')
+    return f"【{media_type}】{title} (来源: {media_type}, 时间: {published})\n{summary_text}\n链接: {link}\n"
 
 def build_message(zh_news, en_news, edu_news):
     msg = "📌 今日 AI 新闻摘要\n\n"
-
-    def format_section(news_list, title):
-        section = f"【{title}】\n"
-        for i, n in enumerate(news_list[:10], 1):
-            combined_text = f"{n['title']} {n['summary']} 链接: {n['link']}"
-            summary = generate_summary(combined_text, max_len=100)
-            section += f"{i}. {summary}\n\n"
-        return section
-
     if zh_news:
-        msg += format_section(zh_news, "中文媒体")
+        for n in zh_news[:10]:
+            msg += format_news_item(n, "中文媒体")
     if en_news:
-        msg += format_section(en_news, "海外媒体")
+        for n in en_news[:10]:
+            msg += format_news_item(n, "海外媒体", translate=True)
     if edu_news:
-        msg += format_section(edu_news, "AI教育新闻")
+        for n in edu_news[:10]:
+            msg += format_news_item(n, "AI教育新闻")
     return msg
 
 def send_to_feishu(text):
