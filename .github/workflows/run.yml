@@ -3,25 +3,18 @@ name: AI News Push
 on:
   workflow_dispatch:  # 手动触发
   schedule:
-    - cron: '0 1 * * *'  # UTC 1点 = 中国 9点
+    - cron: '0 1 * * *'  # UTC 1点 = 中国时间 9点
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
       - name: Install dependencies
-        run: |
-          pip install feedparser requests transformers torch --quiet
-
-      - name: Check Python version
-        run: python --version
-
+        run: pip install feedparser requests --quiet
       - name: Run AI news script
         run: python main.py
