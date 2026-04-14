@@ -2,6 +2,7 @@ import feedparser
 import requests
 import re
 from googletrans import Translator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ===== RSS 源 =====
 rss_list = [
@@ -44,52 +45,59 @@ ai_main_keywords = ["AI", "人工智能", "机器学习"]
 ai_context_keywords = ["深度学习", "神经网络", "算法", "模型", "智能系统", "应用", "architecture", "training"]
 edu_keywords = ["AI教育", "AI教学", "教师", "学生"]
 
-# ===== 翻译工具 =====
 translator = Translator()
+translation_cache = {}
 
 # ===== 工具函数 =====
 def clean_text(text):
-    # 去掉 HTML 标签
     text = re.sub(r'<.*?>', '', text)
-    # 去掉多余空格和换行
     return ' '.join(text.split())
 
 def is_ai_related(text):
     text = clean_text(text)
-    main_found = any(k.lower() in text.lower() for k in ai_main_keywords)
-    context_found = any(k.lower() in text.lower() for k in ai_context_keywords)
-    return main_found and context_found
+    return any(k.lower() in text.lower() for k in ai_main_keywords) and any(k.lower() in text.lower() for k in ai_context_keywords)
 
 def is_edu_related(text):
     text = clean_text(text)
     return any(k.lower() in text.lower() for k in edu_keywords)
 
 def translate_to_chinese(text):
+    text = clean_text(text)
+    if text in translation_cache:
+        return translation_cache[text]
     try:
-        return translator.translate(text, dest='zh-cn').text
+        translated = translator.translate(text, dest='zh-cn').text
+        translation_cache[text] = translated
+        return translated
     except:
         return text
 
 def generate_summary(text, max_len=100):
     text = clean_text(text)
-    if len(text) > max_len:
-        return text[:max_len] + "…"
-    return text
+    return text if len(text) <= max_len else text[:max_len] + "…"
 
-def fetch_news():
+# ===== 并发抓取单个 RSS =====
+def fetch_single_rss(url, max_entries=5):
     news = []
-    for url in rss_list:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:10]:
-                news.append({
-                    "title": entry.title,
-                    "link": entry.link,
-                    "summary": entry.summary if "summary" in entry else "",
-                    "published": entry.get("published", "")
-                })
-        except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
+    try:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:max_entries]:
+            news.append({
+                "title": entry.title,
+                "link": entry.link,
+                "summary": entry.summary if "summary" in entry else "",
+                "published": entry.get("published", "")
+            })
+    except:
+        pass
+    return news
+
+def fetch_news_concurrent():
+    news = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_single_rss, url) for url in rss_list]
+        for future in as_completed(futures):
+            news.extend(future.result())
     return news
 
 def classify_news(news):
@@ -99,7 +107,6 @@ def classify_news(news):
         if is_edu_related(combined_text):
             edu_news.append(n)
         elif is_ai_related(combined_text):
-            # 判断是否含英文字符
             if any(c.isascii() for c in n['title']):
                 en_news.append(n)
             else:
@@ -121,8 +128,11 @@ def build_message(zh_news, en_news, edu_news):
     msg = "📌 今日 AI 新闻摘要\n\n"
     for n in zh_news[:10]:
         msg += format_news_item(n, "中文媒体")
-    for n in en_news[:10]:
-        msg += format_news_item(n, "海外媒体", translate=True)
+    # 并发翻译海外新闻
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(format_news_item, n, "海外媒体", True) for n in en_news[:5]]
+        for future in as_completed(futures):
+            msg += future.result()
     for n in edu_news[:10]:
         msg += format_news_item(n, "AI教育新闻")
     return msg
@@ -130,14 +140,12 @@ def build_message(zh_news, en_news, edu_news):
 def send_to_feishu(text):
     data = {"msg_type": "text", "content": {"text": text}}
     try:
-        resp = requests.post(FEISHU_WEBHOOK, json=data)
-        if resp.status_code != 200:
-            print("Feishu push failed:", resp.text)
-    except Exception as e:
-        print("Feishu push error:", e)
+        requests.post(FEISHU_WEBHOOK, json=data)
+    except:
+        pass
 
 def main():
-    news = fetch_news()
+    news = fetch_news_concurrent()
     zh_news, en_news, edu_news = classify_news(news)
     msg = build_message(zh_news, en_news, edu_news)
     send_to_feishu(msg)
