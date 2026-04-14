@@ -18,7 +18,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install feedparser requests transformers torch sentencepiece --quiet
+          pip install feedparser requests transformers torch sentencepiece protobuf --quiet
+
+      - name: Check Python version
+        run: python --version
 
       - name: Run AI news script
         run: python main.py
