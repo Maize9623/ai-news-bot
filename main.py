@@ -1,7 +1,7 @@
 import feedparser
 import requests
 from datetime import datetime
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
 # ===== RSS 源 =====
@@ -44,9 +44,10 @@ FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bd733c08-ca3a-4bb
 ai_keywords = ["AI", "人工智能", "机器学习"]
 edu_keywords = ["AI教育", "AI教学", "教师", "学生"]
 
-# ===== 加载中文模型 =====
-tokenizer = AutoTokenizer.from_pretrained("THUDM/chatglm-6b", trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained("THUDM/chatglm-6b", trust_remote_code=True).half().cuda()
+# ===== 轻量中文模型 =====
+model_name = "uer/gpt2-chinese-cluecorpussmall"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
 model.eval()
 
 # ===== 工具函数 =====
@@ -65,16 +66,12 @@ def fetch_news():
                     "summary": entry.summary if "summary" in entry else "",
                     "published": entry.get("published", "")
                 })
-        except Exception as e:
-            print(f"Failed to fetch {url}: {e}")
+        except:
             continue
     return news
 
 def classify_news(news):
-    zh_news = []
-    en_news = []
-    edu_news = []
-
+    zh_news, en_news, edu_news = [], [], []
     for n in news:
         text = n["title"] + n["summary"]
         if is_match(text, ai_keywords):
@@ -87,15 +84,14 @@ def classify_news(news):
     return zh_news, en_news, edu_news
 
 def generate_summary(text):
-    prompt = f"请将以下新闻内容生成100字以内中文摘要，包含标题、时间、来源链接，并保持易读：\n{text}"
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
-    output = model.generate(**inputs, max_new_tokens=150)
-    result = tokenizer.decode(output[0], skip_special_tokens=True)
-    return result.strip()
+    prompt = f"请将以下新闻生成100字以内中文摘要：\n{text}"
+    inputs = tokenizer(prompt, return_tensors="pt")
+    output = model.generate(**inputs, max_new_tokens=60)
+    summary = tokenizer.decode(output[0], skip_special_tokens=True)
+    return summary.strip()
 
 def build_message(zh_news, en_news, edu_news):
     msg = "📌 今日 AI 新闻摘要\n\n"
-
     def format_section(news_list, title):
         section = f"【{title}】\n"
         for i, n in enumerate(news_list[:10], 1):
@@ -103,7 +99,6 @@ def build_message(zh_news, en_news, edu_news):
             summary = generate_summary(combined_text)
             section += f"{i}. {summary}\n\n"
         return section
-
     if zh_news:
         msg += format_section(zh_news, "中文媒体")
     if en_news:
@@ -113,10 +108,7 @@ def build_message(zh_news, en_news, edu_news):
     return msg
 
 def send_to_feishu(text):
-    data = {
-        "msg_type": "text",
-        "content": {"text": text}
-    }
+    data = {"msg_type": "text", "content": {"text": text}}
     try:
         resp = requests.post(FEISHU_WEBHOOK, json=data)
         if resp.status_code != 200:
