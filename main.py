@@ -44,12 +44,6 @@ FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bd733c08-ca3a-4bb
 ai_keywords = ["AI", "人工智能", "机器学习"]
 edu_keywords = ["AI教育", "AI教学", "教师", "学生"]
 
-# ===== 轻量中文模型 =====
-model_name = "uer/gpt2-chinese-cluecorpussmall"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-model.eval()
-
 # ===== 工具函数 =====
 def is_match(text, keywords):
     return any(k.lower() in text.lower() for k in keywords)
@@ -59,14 +53,15 @@ def fetch_news():
     for url in rss_list:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:10]:
+            for entry in feed.entries[:10]:  # 每源前10条
                 news.append({
                     "title": entry.title,
                     "link": entry.link,
                     "summary": entry.summary if "summary" in entry else "",
                     "published": entry.get("published", "")
                 })
-        except:
+        except Exception as e:
+            print(f"Failed to fetch {url}: {e}")
             continue
     return news
 
@@ -83,22 +78,24 @@ def classify_news(news):
                 zh_news.append(n)
     return zh_news, en_news, edu_news
 
-def generate_summary(text):
-    prompt = f"请将以下新闻生成100字以内中文摘要：\n{text}"
-    inputs = tokenizer(prompt, return_tensors="pt")
-    output = model.generate(**inputs, max_new_tokens=60)
-    summary = tokenizer.decode(output[0], skip_special_tokens=True)
-    return summary.strip()
+def generate_summary(text, max_len=100):
+    # 规则生成摘要：取前 max_len 字，去掉多余空格
+    clean_text = ' '.join(text.split())
+    if len(clean_text) > max_len:
+        return clean_text[:max_len] + "…"
+    return clean_text
 
 def build_message(zh_news, en_news, edu_news):
     msg = "📌 今日 AI 新闻摘要\n\n"
+
     def format_section(news_list, title):
         section = f"【{title}】\n"
         for i, n in enumerate(news_list[:10], 1):
-            combined_text = f"{n['title']}\n发布时间: {n['published']}\n链接: {n['link']}\n内容: {n['summary']}"
-            summary = generate_summary(combined_text)
+            combined_text = f"{n['title']} {n['summary']} 链接: {n['link']}"
+            summary = generate_summary(combined_text, max_len=100)
             section += f"{i}. {summary}\n\n"
         return section
+
     if zh_news:
         msg += format_section(zh_news, "中文媒体")
     if en_news:
