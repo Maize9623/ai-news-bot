@@ -1,9 +1,9 @@
 name: AI News Push
 
 on:
+  workflow_dispatch:  # 手动触发
   schedule:
-    - cron: '0 1 * * *'  # UTC 1点 = 中国时间 9点
-  workflow_dispatch:
+    - cron: '0 1 * * *'  # UTC 1点 = 中国 9点
 
 jobs:
   run:
@@ -18,7 +18,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install feedparser requests transformers torch sentencepiece protobuf --quiet
+          pip install feedparser requests transformers torch --quiet
 
       - name: Check Python version
         run: python --version
