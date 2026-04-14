@@ -1,8 +1,6 @@
 import feedparser
 import requests
 from datetime import datetime
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 
 # ===== RSS 源 =====
 rss_list = [
