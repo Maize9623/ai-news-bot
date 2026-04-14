@@ -40,19 +40,29 @@ rss_list = [
 FEISHU_WEBHOOK = "https://open.feishu.cn/open-apis/bot/v2/hook/bd733c08-ca3a-4bb5-bcd2-669e14f28579"
 
 # ===== 关键词 =====
-ai_keywords = ["AI", "人工智能", "机器学习"]
+ai_main_keywords = ["AI", "人工智能", "机器学习"]
+ai_context_keywords = ["深度学习", "神经网络", "算法", "模型", "智能系统", "应用", "architecture", "training"]
 edu_keywords = ["AI教育", "AI教学", "教师", "学生"]
 
 # ===== 翻译工具 =====
 translator = Translator()
 
 # ===== 工具函数 =====
-def is_match(text, keywords):
-    return any(k.lower() in text.lower() for k in keywords)
-
 def clean_text(text):
-    text = re.sub(r'<.*?>', '', text)  # 去掉 HTML 标签
-    return ' '.join(text.split())       # 去掉多余空格
+    # 去掉 HTML 标签
+    text = re.sub(r'<.*?>', '', text)
+    # 去掉多余空格和换行
+    return ' '.join(text.split())
+
+def is_ai_related(text):
+    text = clean_text(text)
+    main_found = any(k.lower() in text.lower() for k in ai_main_keywords)
+    context_found = any(k.lower() in text.lower() for k in ai_context_keywords)
+    return main_found and context_found
+
+def is_edu_related(text):
+    text = clean_text(text)
+    return any(k.lower() in text.lower() for k in edu_keywords)
 
 def translate_to_chinese(text):
     try:
@@ -85,11 +95,12 @@ def fetch_news():
 def classify_news(news):
     zh_news, en_news, edu_news = [], [], []
     for n in news:
-        text = n['title'] + n['summary']
-        if is_match(text, ai_keywords):
-            if is_match(text, edu_keywords):
-                edu_news.append(n)
-            elif any(c.isascii() for c in n['title']):
+        combined_text = n['title'] + n['summary']
+        if is_edu_related(combined_text):
+            edu_news.append(n)
+        elif is_ai_related(combined_text):
+            # 判断是否含英文字符
+            if any(c.isascii() for c in n['title']):
                 en_news.append(n)
             else:
                 zh_news.append(n)
@@ -108,15 +119,12 @@ def format_news_item(news, media_type, translate=False):
 
 def build_message(zh_news, en_news, edu_news):
     msg = "📌 今日 AI 新闻摘要\n\n"
-    if zh_news:
-        for n in zh_news[:10]:
-            msg += format_news_item(n, "中文媒体")
-    if en_news:
-        for n in en_news[:10]:
-            msg += format_news_item(n, "海外媒体", translate=True)
-    if edu_news:
-        for n in edu_news[:10]:
-            msg += format_news_item(n, "AI教育新闻")
+    for n in zh_news[:10]:
+        msg += format_news_item(n, "中文媒体")
+    for n in en_news[:10]:
+        msg += format_news_item(n, "海外媒体", translate=True)
+    for n in edu_news[:10]:
+        msg += format_news_item(n, "AI教育新闻")
     return msg
 
 def send_to_feishu(text):
